@@ -14,6 +14,7 @@ namespace NoClippy
         public bool EnableAnimLockComp = true;
         public bool EnableLogging = false;
         public bool EnableDryRun = false;
+        public float animationLockRemovePercentage = 0.0f;
         public Dictionary<uint, float> AnimationLocks = new();
         public ulong TotalActionsReduced = 0ul;
         public double TotalAnimationLockReduction = 0d;
@@ -100,96 +101,14 @@ namespace NoClippy.Modules
             try
             {
                 if (oldLock == newLock || sourceActor != DalamudApi.ClientState.LocalPlayer?.Address) return;
+                Game.actionManager->animationLock = newLock-(newLock*(Config.animationLockRemovePercentage/100));
+                return;
 
-                // Ignore cast locks (caster tax, teleport, lb)
-                if (isCasting)
-                {
-                    isCasting = false;
-
-                    // The old lock should always be 0, but high ping can cause the packet to arrive too late and allow near instant double weaves
-                    newLock += oldLock;
-                    if (!IsDryRunEnabled)
-                        Game.actionManager->animationLock = newLock;
-
-                    if (Config.EnableLogging)
-                        PrintLog($"Cast Lock: {F2MS(newLock)} ms (+{F2MS(oldLock)})");
-                    return;
-                }
-
-                if (newLock != *(float*)(effectHeader + 0x10))
-                {
-                    PrintError("Mismatched animation lock offset! This can be caused by another plugin affecting the animation lock.");
-                    return;
-                }
-
-                // Special case to (mostly) prevent accidentally using XivAlexander at the same time
-                var isUsingAlexander = newLock % 0.01 is >= 0.0005f and <= 0.0095f;
-                if (!enableAnticheat && isUsingAlexander)
-                {
-                    enableAnticheat = true;
-                    PrintError($"Unexpected lock of {F2MS(newLock)} ms, temporary dry run has been enabled. Please disable any other programs or plugins that may be affecting the animation lock.");
-                }
-
-                var sequence = *(ushort*)(effectHeader + 0x18); // This is 0 for some special actions
-                var actionID = *(ushort*)(effectHeader + 0x1C);
-
-                if (!appliedAnimationLocks.TryGetValue(sequence, out var appliedLock))
-                    appliedLock = 0.5f;
-
-                if (sequence == Game.actionManager->currentSequence)
-                    appliedAnimationLocks.Clear(); // Probably unnecessary
-
-                var lastRecordedLock = appliedLock - simulatedRTT;
-
-                if (!enableAnticheat)
-                    UpdateDatabase(actionID, newLock);
-
-                // Get the difference between the recorded animation lock and the real one
-                var correction = newLock - lastRecordedLock;
-                var rtt = appliedLock - oldLock;
-
-                if (rtt <= simulatedRTT)
-                {
-                    if (Config.EnableLogging)
-                        PrintLog($"RTT ({F2MS(rtt)} ms) was lower than {F2MS(simulatedRTT)} ms, no adjustments were made");
-                    return;
-                }
-
-                var prevAverage = delay;
-                var newAverage = AverageDelay(rtt, packetsSent > 1 ? 0.1f : 1f);
-                var average = Math.Max(prevAverage > 0 ? prevAverage : newAverage, 0.001f);
-
-                var variationMultiplier = Math.Max(rtt / average, 1) - 1;
-                var networkVariation = simulatedRTT * variationMultiplier;
-
-                var adjustedAnimationLock = Math.Max(oldLock + correction + networkVariation, 0);
-
-                if (!IsDryRunEnabled && float.IsFinite(adjustedAnimationLock) && adjustedAnimationLock < 10)
-                {
-                    Game.actionManager->animationLock = adjustedAnimationLock;
-
-                    Config.TotalAnimationLockReduction += newLock - adjustedAnimationLock;
-                    Config.TotalActionsReduced++;
-
-                    if (!saveConfig && DalamudApi.Condition[ConditionFlag.InCombat])
-                        saveConfig = true;
-                }
-
-                if (!Config.EnableLogging) return;
-
-                var logString = IsDryRunEnabled ? "[DRY] " : string.Empty;
-                logString += $"Action: {actionID} {(lastRecordedLock != newLock ? $"({F2MS(lastRecordedLock)} > {F2MS(newLock)} ms)" : $"({F2MS(newLock)} ms)")}";
-                logString += $" || RTT: {F2MS(rtt)} (+{variationMultiplier:P0}) ms";
-
-                if (enableAnticheat)
-                    logString += $" [Alexander: {F2MS(rtt - (lastRecordedLock - newLock))} ms]";
-
-                logString += $" || Lock: {F2MS(oldLock)} > {F2MS(adjustedAnimationLock)} ({F2MS(correction + networkVariation):+0;-#}) ms";
-                logString += $" || Packets: {packetsSent}";
-
-                PrintLog(logString);
+            } catch
+                (Exception ex)
+            {
+                PluginLog.Warning(ex, "Error applying animation lock");
             }
-            catch { PrintError("Error in AnimationLock Module"); }
         }
 
         private void NetworkMessage(nint dataPtr, ushort opCode, uint sourceActorId, uint targetActorId, NetworkMessageDirection direction)
@@ -217,29 +136,15 @@ namespace NoClippy.Modules
 
         public override void DrawConfig()
         {
-            if (ImGui.Checkbox("Enable Animation Lock Reduction", ref Config.EnableAnimLockComp))
+            if (ImGui.Checkbox("Enable Plugin", ref Config.EnableAnimLockComp))
                 Config.Save();
             PluginUI.SetItemTooltip("Modifies the way the game handles animation lock," +
                 "\ncausing it to simulate 10 ms ping.");
 
-            if (Config.EnableAnimLockComp)
-            {
-                ImGui.Columns(2, null, false);
+            ImGui.TextUnformatted($"Animation Lock Remove Percentage: {Config.animationLockRemovePercentage:0.0}%");
 
-                if (ImGui.Checkbox("Enable Logging", ref Config.EnableLogging))
-                    Config.Save();
-
-                ImGui.NextColumn();
-
-                var _ = IsDryRunEnabled;
-                if (ImGui.Checkbox("Dry Run", ref _))
-                {
-                    Config.EnableDryRun = _;
-                    enableAnticheat = false;
-                    Config.Save();
-                }
-                PluginUI.SetItemTooltip("The plugin will still log and perform calculations, but no in-game values will be overwritten.");
-            }
+            if (ImGui.SliderFloat("", ref Config.animationLockRemovePercentage, 0.0f, 100.0f, "%.0f%%"))
+                Config.Save();
 
             ImGui.Columns(1);
 

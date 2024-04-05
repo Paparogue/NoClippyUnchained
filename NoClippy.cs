@@ -1,8 +1,11 @@
 using System;
+using Dalamud.Game.Network;
 using Dalamud.Game.Text;
+using Dalamud.IoC;
 using Dalamud.Logging;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
+using static Dalamud.Plugin.Services.IGameNetwork;
 
 namespace NoClippy
 {
@@ -11,14 +14,13 @@ namespace NoClippy
         public static NoClippy Plugin { get; private set; }
         public static Configuration Config { get; private set; }
 
-        public NoClippy(DalamudPluginInterface pluginInterface)
+        public NoClippy(DalamudPluginInterface pluginInterface, [RequiredVersion("1.0")] IGameNetwork ingNetwork)
         {
             Plugin = this;
             DalamudApi.Initialize(this, pluginInterface);
-
+           
             Config = (Configuration)DalamudApi.PluginInterface.GetPluginConfig() ?? new();
             Config.Initialize();
-
             try
             {
                 Game.Initialize();
@@ -107,7 +109,6 @@ namespace NoClippy
             if (!disposing) return;
 
             Config.Save();
-
             DalamudApi.Framework.Update -= Update;
             DalamudApi.PluginInterface.UiBuilder.Draw -= PluginUI.Draw;
             DalamudApi.PluginInterface.UiBuilder.OpenConfigUi -= ConfigUI.ToggleVisible;
