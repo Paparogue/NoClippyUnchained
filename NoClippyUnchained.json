@@ -5,7 +5,7 @@
   "Description": "Feel the full extent of no animation locks.",
   "InternalName": "NoClippyUnchained",
   "ApplicableVersion": "any",
-  "DalamudApiLevel": 13,
+  "DalamudApiLevel": 14,
   "RepoUrl": "https://github.com/Paparogue",
   "IconUrl": "https://raw.github.com/Paparogue/NoClippyUnchained/606ed286d0f83203ba7aeec765db6d82958571d8/Unchained.png",
   "ImageUrls": [ "" ],

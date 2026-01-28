@@ -1,8 +1,8 @@
-﻿<Project Sdk="Dalamud.NET.Sdk/13.0.0">
+﻿<Project Sdk="Dalamud.NET.Sdk/14.0.1">
 
     <PropertyGroup>
-        <Version>1.0.0.1</Version>
-        <TargetFramework>net9.0-windows</TargetFramework>
+        <Version>1.0.0.2</Version>
+        <TargetFramework>net10.0-windows</TargetFramework>
         <PlatformTarget>x64</PlatformTarget>
         <Platforms>x64;AnyCPU</Platforms>
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>

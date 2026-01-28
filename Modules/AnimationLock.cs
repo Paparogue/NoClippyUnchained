@@ -104,7 +104,7 @@ namespace NoClippyUnchained.Modules
         {
             try
             {
-                if (oldLock == newLock || sourceActor != DalamudApi.ClientState.LocalPlayer?.Address) return;
+                if (oldLock == newLock || sourceActor != DalamudApi.ObjectTable.LocalPlayer?.Address) return;
 
                 if (isCasting && !Config.EnableIgnoreCasting)
                 {
