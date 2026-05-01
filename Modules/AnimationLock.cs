@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Numerics;
 using System.Text;
 using Dalamud.Game.ClientState.Conditions;
-using Dalamud.Game.Network;
 using FFXIVClientStructs.FFXIV.Client.Game;
+using FFXIVClientStructs.FFXIV.Client.Game.Character;
+using FFXIVClientStructs.FFXIV.Client.Game.Object;
 using Dalamud.Bindings.ImGui;
 using static NoClippyUnchained.NoClippyUnchained;
 
@@ -28,20 +30,6 @@ namespace NoClippyUnchained.Modules
 {
     public class AnimationLock : Module
     {
-        // ALL INFO BELOW IS BASED ON MY FINDINGS AND I RESERVE THE RIGHT TO HAVE MISINTERPRETED SOMETHING, THANKS
-        // The typical time range that passes for the client is never equal to ping, it always seems to be at least ping + server delay
-        // The server delay is usually around 40-60 ms in the overworld, but falls to 30-40 ms inside of instances
-        // Additionally, your FPS will add more time because one frame MUST pass for you to receive the new animation lock
-        // Therefore, most players will never receive a response within 40 ms at any ping
-        // Another interesting fact is that the delay from the server will spike if you send multiple packets at the same time
-        // This seems to imply that the server will not process more than one packet from you per tick
-        // You can see this if you sheathe your weapon before using an action, you will notice delays that are around 50 ms higher than usual
-        // This explains the phenomenon where moving seems to make it harder to weave
-
-        // For these reasons, I do not believe it is possible to triple weave on any ping without clipping even the slightest amount as that would require 25 ms response times for a 2.5 GCD triple
-
-        // This module simulates around 10 ms ping inside instances
-
         public override bool IsEnabled
         {
             get => Config.EnableAnimLockComp;
@@ -56,7 +44,7 @@ namespace NoClippyUnchained.Modules
         private bool isCasting = false;
         private float intervalPacketsTimer = 0;
         private int intervalPacketsIndex = 0;
-        private readonly int[] intervalPackets = new int[5]; // Record the last 50 ms of packets
+        private readonly int[] intervalPackets = new int[5];
         private bool saveConfig = false;
         private readonly Dictionary<ushort, float> appliedAnimationLocks = new();
 
@@ -65,7 +53,7 @@ namespace NoClippyUnchained.Modules
         private float AverageDelay(float currentDelay, float weight) =>
             delay > 0
                 ? delay = delay * (1 - weight) + currentDelay * weight
-                : delay = currentDelay; // Initial starting delay
+                : delay = currentDelay;
 
         private static float GetAnimationLock(uint actionID) => (!Config.AnimationLocks.TryGetValue(actionID, out var animationLock) || animationLock < 0.5f
                 ? Game.DefaultClientAnimationLock
@@ -100,11 +88,11 @@ namespace NoClippyUnchained.Modules
         private void CastBegin(ulong objectID, nint packetData) => isCasting = true;
         private void CastInterrupt(nint actionManager) => isCasting = false;
 
-        private unsafe void ReceiveActionEffect(int sourceActorID, nint sourceActor, nint vectorPosition, nint effectHeader, nint effectArray, nint effectTrail, float oldLock, float newLock)
+        private unsafe void ReceiveActionEffect(uint casterEntityId, Character* casterPtr, Vector3* targetPos, ActionEffectHandler.Header* header, ActionEffectHandler.TargetEffects* effects, GameObjectId* targetEntityIds, float oldLock, float newLock)
         {
             try
             {
-                if (oldLock == newLock || sourceActor != DalamudApi.ObjectTable.LocalPlayer?.Address) return;
+                if (oldLock == newLock || (nint)casterPtr != DalamudApi.ObjectTable.LocalPlayer?.Address) return;
 
                 if (isCasting && !Config.EnableIgnoreCasting)
                 {
@@ -117,14 +105,14 @@ namespace NoClippyUnchained.Modules
                     return;
                 }
 
-                if (!Config.UsePercentage) {
-                    var sequence = *(ushort*)(effectHeader + 0x18); // This is 0 for some special actions
-                    var actionID = *(ushort*)(effectHeader + 0x1C);
+                if (!Config.UsePercentage)
+                {
+                    var sequence = header->SourceSequence;
+                    var actionID = header->SpellId;
                     var appliedLock = appliedAnimationLocks.GetValueOrDefault(sequence, 0.5f);
 
                     var lastRecordedLock = IsDryRunEnabled ? newLock : appliedLock - simulatedRTT;
 
-                    // Get the difference between the recorded animation lock and the real one
                     var correction = newLock - lastRecordedLock;
                     var rtt = appliedLock - oldLock;
 
@@ -171,12 +159,10 @@ namespace NoClippyUnchained.Modules
                 }
                 else
                 {
-                    var actionID = *(ushort*)(effectHeader + 0x1C);
-                    // Calculate the percentage reduction
+                    var actionID = header->SpellId;
                     var reductionPercent = Config.AnimationLockPercent / 100f;
                     var adjustedAnimationLock = oldLock * (1f - reductionPercent);
 
-                    // Apply the reduced animation lock
                     if (!IsDryRunEnabled && float.IsFinite(adjustedAnimationLock) && adjustedAnimationLock < 20)
                     {
                         Game.actionManager->animationLock = adjustedAnimationLock;
@@ -204,9 +190,8 @@ namespace NoClippyUnchained.Modules
             catch { PrintError("Error in AnimationLock Module"); }
         }
 
-        private void NetworkMessage(nint dataPtr, ushort opCode, uint sourceActorId, uint targetActorId, NetworkMessageDirection direction)
+        private void NetworkMessage()
         {
-            if (direction != NetworkMessageDirection.ZoneUp) return;
             intervalPackets[intervalPacketsIndex]++;
         }
 
@@ -249,7 +234,7 @@ namespace NoClippyUnchained.Modules
 
             if (Config.EnableAnimLockComp)
             {
-                ImGui.Columns(2, "", false);
+                ImGui.Columns(2, "AnimlockColumns", false);
 
                 if (ImGui.Checkbox("Enable Logging", ref Config.EnableLogging))
                     Config.Save();
@@ -270,13 +255,7 @@ namespace NoClippyUnchained.Modules
             ImGui.TextUnformatted($"Reduced a total time of {TimeSpan.FromSeconds(Config.TotalAnimationLockReduction):d\\:hh\\:mm\\:ss} from {Config.TotalActionsReduced} actions");
         }
 
-        private void NetworkMessage(NetworkMessageDirection direction)
-        {
-            if (direction != NetworkMessageDirection.ZoneUp) return;
-            intervalPackets[intervalPacketsIndex]++;
-        }
-
-        public override void Enable()
+        public override unsafe void Enable()
         {
             Game.OnUseActionLocation += UseActionLocation;
             Game.OnCastBegin += CastBegin;
@@ -286,7 +265,7 @@ namespace NoClippyUnchained.Modules
             Game.OnNetworkMessageDelegate += NetworkMessage;
         }
 
-        public override void Disable()
+        public override unsafe void Disable()
         {
             Game.OnUseActionLocation -= UseActionLocation;
             Game.OnCastBegin -= CastBegin;

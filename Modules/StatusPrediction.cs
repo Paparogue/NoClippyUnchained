@@ -21,7 +21,6 @@ namespace NoClippyUnchained.Modules
 {
     public class StatusPrediction : Module
     {
-        // Previous version of FFXIVClientStruct's Status
         [StructLayout(LayoutKind.Explicit, Size = 0xC)]
         public struct Status
         {
@@ -32,11 +31,6 @@ namespace NoClippyUnchained.Modules
             [FieldOffset(0x8)] public uint SourceID;
         }
 
-        /*public override bool IsEnabled
-        {
-            get => NoClippy.Config.PredictStatusApplications || NoClippy.Config.PredictMudras || NoClippy.Config.PredictDualcast;
-            set => NoClippy.Config.PredictStatusApplications = NoClippy.Config.PredictMudras = NoClippy.Config.PredictDualcast = value;
-        }*/
         public override bool IsEnabled => false;
 
         public override int DrawOrder => 15;
@@ -136,7 +130,7 @@ namespace NoClippyUnchained.Modules
                     var status = statuses[i];
                     if (status.replace)
                         status.Replace(statusList);
-                    else if (i >= currentIndex) // These statuses failed to find a free slot to apply
+                    else if (i >= currentIndex)
                         status.currentSlot = -1;
                 }
             }
@@ -251,23 +245,15 @@ namespace NoClippyUnchained.Modules
         private const ushort MudraStatusID = 496;
         private readonly Dictionary<uint, List<StatusInfo>> predictedStatuses = new()
         {
-            [7561] = new() { new() { id = 167 } }, // Swiftcast
-            [7421] = new() { new() { id = 1211, stacks = 3 } }, // Triplecast
-            [7518] = new() { new() { id = 1238 } }, // Acceleration
-            [24290] = new() { new() { id = 2606, timer = 1.15f, beginAction = () => SwapEukrasia(1), endAction = () => SwapEukrasia(0) } }, // Eukrasia
-            //[7383] = new() { new() { id = 1369 } }, // Requiescat
-            //[23913] = new() { new() { id = 2560 } }, // Lost Chainspell
-            // Firestarter?
-            //[2259] = new() { new() { id = MudraStatusID, stacks = 1, timer = 1f } }, // Ten
-            //[2261] = new() { new() { id = MudraStatusID, stacks = 2, timer = 1f } }, // Chi
-            //[2263] = new() { new() { id = MudraStatusID, stacks = 3, timer = 1f } }, // Jin
-            [2264] = new() { new() { id = 497, beginAction = () => SwapMudras(1), endAction = () => SwapMudras(0) } }, // Kassatsu
+            [7561] = new() { new() { id = 167 } },
+            [7421] = new() { new() { id = 1211, stacks = 3 } },
+            [7518] = new() { new() { id = 1238 } },
+            [24290] = new() { new() { id = 2606, timer = 1.15f, beginAction = () => SwapEukrasia(1), endAction = () => SwapEukrasia(0) } },
+            [2264] = new() { new() { id = 497, beginAction = () => SwapMudras(1), endAction = () => SwapMudras(0) } },
         };
 
-        // TODO: Bandaid until rework
         private static readonly HashSet<ushort> replaceableStatusIDs = new() { 0, 167, 496, 497, 1211, 1238, 1249, 1393, 2606 };
 
-        // Length - 7 seems to be the last one with sourceID 0xE0000000?
         private static unsafe bool IsStatusValid(Status* statusPtr) => statusPtr->StatusID != 0 && (statusPtr->RemainingTime > 0 || statusPtr->SourceID is not (0 or 0xE0000000));
 
         private void UseActionLocation(nint actionManager, uint actionType, uint actionID, ulong targetedActorID, nint vectorLocation, uint param, byte ret)
@@ -298,15 +284,15 @@ namespace NoClippyUnchained.Modules
         {
             switch (actionID)
             {
-                case 2259: // Ten
+                case 2259:
                 case 18805:
                     UpdateMudraStatus(1);
                     break;
-                case 2261: // Chi
+                case 2261:
                 case 18806:
                     UpdateMudraStatus(2);
                     break;
-                case 2263: // Jin
+                case 2263:
                 case 18807:
                     UpdateMudraStatus(3);
                     break;
@@ -328,18 +314,18 @@ namespace NoClippyUnchained.Modules
 
             switch (mudraStacks)
             {
-                case > 63: // Already Failed
+                case > 63:
                     return;
-                case > 15: // Fail
+                case > 15:
                     mudraStacks = 0xFF;
                     break;
-                case > 3: // Third Mudra
+                case > 3:
                     mudraStacks += bit << 4;
                     break;
-                case > 0: // Second Mudra
+                case > 0:
                     mudraStacks += bit << 2;
                     break;
-                default: // First Mudra
+                default:
                     predictedStatusList.Add(MudraStatusID, bit, 0, false, 1f);
                     predictedStatusList.Apply(statusList);
                     return;
@@ -372,11 +358,10 @@ namespace NoClippyUnchained.Modules
             if (!NoClippyUnchained.Config.PredictDualcast || DalamudApi.ObjectTable.LocalPlayer?.ClassJob.RowId != 35 || *(byte*)(packetData + 2) != 1) return;
 
             var actionID = *(ushort*)packetData;
-            if (actionID < 9) return; // Special actions
+            if (actionID < 9) return;
 
             dualCast = null;
             predictDualcast = true;
-            //inPVP = actionID is 8883 or 8885 or 10025 or 17727; // TODO fix this
         }
 
         private void CastInterrupt(nint actionManager)
@@ -395,66 +380,14 @@ namespace NoClippyUnchained.Modules
                 UpdateDualcast();
         }
 
-        private void UpdateStatusList(StatusList statusList, short slot, ushort statusID, float remainingTime, ushort stackParam, uint sourceID)
-        {
-            if (slot < 0)
-                predictedStatusList.Apply(statusList);
-            else
-                predictedStatusList.CheckNewStatus(statusList, slot, statusID);
-        }
-
-        private static void TextCenter(Vector4 color, string text)
-        {
-            ImGui.Spacing();
-            var size = ImGui.CalcTextSize(text).X;
-            ImGui.SetCursorPosX((ImGui.GetWindowSize().X - size) / 2);
-            ImGui.TextColored(color, text);
-        }
-
         public override void DrawConfig()
         {
-            /*
-            var red = new Vector4(1, 0.25f, 0.25f, 1);
-            ImGui.BeginGroup();
-            TextCenter(Vector4.One, "Sorry! Temporarily disabled for Dawntrail.");
-            TextCenter(red, "!!!!!USE AT OWN RISK!!!!!");
-            TextCenter(red, "Experimental prediction settings.");
-            ImGui.Dummy(new Vector2(1000, 8));
-            ImGui.EndGroup();
-            ImGui.BeginDisabled();
-            PluginUI.SetItemTooltip("This is a very early attempt at fixing a major problem with status effects and certain skills." +
-                "\nThe server should decline invalid attempts, but these settings could cause more invalid packets than usual.");
-
-            ImGui.Columns(2, null, false);
-
-            if (ImGui.Checkbox("Predict Statuses", ref NoClippy.Config.PredictStatusApplications))
-                NoClippy.Config.Save();
-            PluginUI.SetItemTooltip("Removes the effects of lag on certain statuses." +
-                "\nCurrently supported:\nSwiftcast\nTriplecast\nAcceleration\nKassatsu\nEukrasia");
-
-            ImGui.NextColumn();
-
-            if (ImGui.Checkbox("Predict Mudras", ref NoClippy.Config.PredictMudras))
-                NoClippy.Config.Save();
-            PluginUI.SetItemTooltip("Removes the effects of lag on using Mudras and Ninjutsu.");
-
-            ImGui.NextColumn();
-
-            if (ImGui.Checkbox("Predict Dualcast", ref NoClippy.Config.PredictDualcast))
-                NoClippy.Config.Save();
-            PluginUI.SetItemTooltip("Mostly removes the effects of lag on dualcast." +
-                "\nWarning: Can easily desync with extremely high lag and slidecasting too early.");
-
-            ImGui.Columns(1);
-            ImGui.EndDisabled();
-            */
         }
 
         public override void Enable()
         {
             Game.OnUseActionLocation += UseActionLocation;
             Game.OnUpdate += Update;
-            Game.OnUpdateStatusList += UpdateStatusList;
             Game.OnCastBegin += CastBegin;
             Game.OnCastInterrupt += CastInterrupt;
         }
@@ -463,7 +396,6 @@ namespace NoClippyUnchained.Modules
         {
             Game.OnUseActionLocation -= UseActionLocation;
             Game.OnUpdate -= Update;
-            Game.OnUpdateStatusList -= UpdateStatusList;
             Game.OnCastBegin -= CastBegin;
             Game.OnCastInterrupt -= CastInterrupt;
         }
